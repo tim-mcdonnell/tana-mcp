@@ -338,6 +338,60 @@ export class TanaMcpServer {
         };
       }
     );
+
+    // Create a supertag tool
+    this.server.tool(
+      'create_supertag',
+      {
+        targetNodeId: z.string().optional().default('SCHEMA'),
+        name: z.string(),
+        description: z.string().optional()
+      },
+      async ({ targetNodeId, name, description }) => {
+        const node: TanaPlainNode = {
+          name,
+          description,
+          supertags: [{ id: 'SYS_T01' }]
+        };
+
+        const result = await this.tanaClient.createNode(targetNodeId, node);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      }
+    );
+
+    // Create a field tool
+    this.server.tool(
+      'create_field',
+      {
+        targetNodeId: z.string().optional().default('SCHEMA'),
+        name: z.string(),
+        description: z.string().optional()
+      },
+      async ({ targetNodeId, name, description }) => {
+        const node: TanaPlainNode = {
+          name,
+          description,
+          supertags: [{ id: 'SYS_T02' }]
+        };
+
+        const result = await this.tanaClient.createNode(targetNodeId, node);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      }
+    );
   }
 
   /**

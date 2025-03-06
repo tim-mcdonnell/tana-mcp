@@ -1,7 +1,7 @@
 {
   "name": "tana-mcp",
-  "version": "1.0.1",
-  "description": "MCP server for interacting with Tana's Input API",
+  "version": "1.1.0",
+  "description": "A Model Context Protocol (MCP) server for Tana",
   "main": "dist/index.js",
   "bin": {
     "tana-mcp": "./dist/index.js"

@@ -22,6 +22,14 @@ This MCP server fully implements all capabilities of the Tana Input API:
 - Apply multiple supertags to a single node
 - Create nested field structures
 
+### Schema Management
+- Dedicated tools for creating supertags (`create_supertag`)
+- Dedicated tools for creating fields (`create_field`)
+- Create new supertags using system supertag SYS_T01
+- Create new fields using system supertag SYS_T02
+- Apply supertags with custom field values
+- Apply multiple supertags to the same node
+
 ### Node Modification
 - Update node names
 
@@ -82,7 +90,6 @@ If you prefer to clone the repository:
 1. Create a `.env` file in the project root (or copy from `.env.example`):
    ```
    TANA_API_TOKEN=your-tana-api-token-here
-   # TANA_API_ENDPOINT=optional-custom-endpoint
    ```
 
 2. Set your Tana API token as an environment variable:
@@ -138,7 +145,7 @@ To use this MCP server with Claude Desktop:
       "command": "npx",
       "args": [
         "-y", 
-        "@tim-mcdonnell/tana-mcp"
+        "tana-mcp"
         ],
       "env": {
         "TANA_API_TOKEN": "your-tana-api-token-here"
@@ -397,6 +404,213 @@ Creates a complex node structure in Tana.
   }
 }
 ```
+
+### Creating Supertags and Fields
+
+### Using Dedicated Tools (Recommended)
+
+The simplest way to create supertags and fields is to use the dedicated tools:
+
+#### Creating a Supertag
+
+```javascript
+{
+  "name": "create_supertag",
+  "parameters": {
+    "name": "Project",
+    "description": "A project supertag"
+  }
+}
+```
+
+#### Creating a Field
+
+```javascript
+{
+  "name": "create_field",
+  "parameters": {
+    "name": "Due Date",
+    "description": "When the task is due"
+  }
+}
+```
+
+### Using the create_plain_node Tool (Advanced)
+
+Alternatively, you can use the more general `create_plain_node` tool with system supertag IDs:
+
+#### Creating a Supertag
+
+To create a supertag, you need to apply the system supertag with ID `SYS_T01` to a node. This is typically done in the Schema node (ID: `SCHEMA`).
+
+```javascript
+{
+  "name": "create_plain_node",
+  "parameters": {
+    "targetNodeId": "SCHEMA",
+    "name": "Project",
+    "description": "A project supertag",
+    "supertags": [
+      {
+        "id": "SYS_T01"
+      }
+    ]
+  }
+}
+```
+
+#### Creating a Field
+
+To create a field, you need to apply the system supertag with ID `SYS_T02` to a node. This is typically done in the Schema node (ID: `SCHEMA`).
+
+```javascript
+{
+  "name": "create_plain_node",
+  "parameters": {
+    "targetNodeId": "SCHEMA",
+    "name": "Due Date",
+    "description": "When the task is due",
+    "supertags": [
+      {
+        "id": "SYS_T02"
+      }
+    ]
+  }
+}
+```
+
+## Working with Supertags
+
+Supertags are a powerful feature in Tana that allow you to apply structured metadata to nodes. This MCP server fully supports creating and applying supertags.
+
+#### Getting Supertag IDs
+
+To apply existing supertags to nodes, you need the supertag's ID. In Tana:
+1. Go to the supertag configuration panel
+2. Run the command "Show API Schema" on the supertag title
+3. The ID will be shown in the schema information
+
+#### Supertag Format
+
+The format for a supertag in API calls is:
+
+```javascript
+{
+  id: "supertag-node-id",  // The ID of the supertag definition
+  fields: {                // Optional field values for this supertag instance
+    "field-id-1": "value for field 1",
+    "field-id-2": "value for field 2"
+  }
+}
+```
+
+#### Applying a Single Supertag
+
+Apply a supertag to a node like this:
+
+```javascript
+{
+  "name": "create_plain_node",
+  "parameters": {
+    "name": "Task with supertag",
+    "supertags": [
+      {
+        "id": "task-supertag-id"
+      }
+    ]
+  }
+}
+```
+
+#### Applying Multiple Supertags
+
+You can apply multiple supertags to the same node:
+
+```javascript
+{
+  "name": "create_plain_node",
+  "parameters": {
+    "name": "Node with multiple supertags",
+    "supertags": [
+      {
+        "id": "project-supertag-id",
+        "fields": {
+          "priority": "high"
+        }
+      },
+      {
+        "id": "task-supertag-id",
+        "fields": {
+          "assignee": "John"
+        }
+      }
+    ]
+  }
+}
+```
+
+#### Supertags with Field Values
+
+Apply a supertag with specific field values:
+
+```javascript
+{
+  "name": "create_plain_node",
+  "parameters": {
+    "name": "Project with fields",
+    "supertags": [
+      {
+        "id": "project-supertag-id",
+        "fields": {
+          "priority-field-id": "High",
+          "status-field-id": "In Progress",
+          "due-date-field-id": "2023-12-31"
+        }
+      }
+    ]
+  }
+}
+```
+
+## Tools
+
+The MCP server exposes the following tools:
+
+#### `create_plain_node`
+
+Creates a plain text node in Tana.
+
+**Parameters:**
+- `targetNodeId` (optional): The ID of the node to add this node to. Defaults to the Inbox.
+- `name`: The name of the node.
+- `description` (optional): A description for the node.
+- `supertags` (optional): An array of supertags to apply to the node.
+
+#### `create_supertag`
+
+Creates a new supertag in Tana.
+
+**Parameters:**
+- `targetNodeId` (optional): The ID of the node to add this supertag to. Defaults to 'SCHEMA'.
+- `name`: The name of the supertag.
+- `description` (optional): A description for the supertag.
+
+#### `create_field`
+
+Creates a new field in Tana.
+
+**Parameters:**
+- `targetNodeId` (optional): The ID of the node to add this field to. Defaults to 'SCHEMA'.
+- `name`: The name of the field.
+- `description` (optional): A description for the field.
+
+#### `create_node_structure`
+
+Creates a complex node structure in Tana.
+
+**Parameters:**
+- `targetNodeId` (optional): The ID of the node to add this structure to. Defaults to the Inbox.
+- `node`: A node structure (can be nested with children, supertags, etc.)
 
 ## Tana API Limitations
 
