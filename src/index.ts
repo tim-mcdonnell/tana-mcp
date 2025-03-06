@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /**
  * Tana MCP Server
  * Main entry point for the MCP server that connects to Tana's Input API

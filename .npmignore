@@ -1,0 +1,18 @@
+# Source files
+src/
+
+# Development files
+node_modules/
+.git/
+.github/
+.gitignore
+
+# Environment files
+.env
+.env.example
+
+# Config files
+tsconfig.json
+
+# Examples (since they're included in the README)
+examples/ 
