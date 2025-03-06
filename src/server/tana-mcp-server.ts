@@ -78,7 +78,7 @@ export class TanaMcpServer {
     // Connect the server to the transport
     await this.server.connect(transport);
 
-    console.log('Tana MCP server started');
+    console.error('Tana MCP server started');
   }
 
   /**
