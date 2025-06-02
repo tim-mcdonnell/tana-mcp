@@ -552,7 +552,7 @@ export class TanaMcpServer {
         description: z.string().optional().describe('Task description'),
         dueDate: z.string().optional().describe('Due date in ISO format (YYYY-MM-DD)'),
         priority: z.enum(['high', 'medium', 'low']).optional().describe('Task priority'),
-        tags: z.array(z.string()).optional().describe('Tags to apply to the task')
+        tags: z.string().optional().describe('Comma-separated tags to apply to the task')
       },
       ({ title, description, dueDate, priority, tags }) => {
         const parts = [`Create a task in Tana: "${title}"`];
@@ -560,7 +560,7 @@ export class TanaMcpServer {
         if (description) parts.push(`Description: ${description}`);
         if (dueDate) parts.push(`Due date: ${dueDate}`);
         if (priority) parts.push(`Priority: ${priority}`);
-        if (tags && tags.length > 0) parts.push(`Tags: ${tags.join(', ')}`);
+        if (tags) parts.push(`Tags: ${tags}`);
         
         return {
           messages: [{
@@ -581,22 +581,23 @@ export class TanaMcpServer {
       {
         name: z.string().describe('Project name'),
         description: z.string().optional().describe('Project description'),
-        goals: z.array(z.string()).optional().describe('Project goals'),
+        goals: z.string().optional().describe('Comma-separated list of project goals'),
         startDate: z.string().optional().describe('Start date in ISO format'),
         endDate: z.string().optional().describe('End date in ISO format'),
-        team: z.array(z.string()).optional().describe('Team member names')
+        team: z.string().optional().describe('Comma-separated team member names')
       },
       ({ name, description, goals, startDate, endDate, team }) => {
         const parts = [`Create a project in Tana: "${name}"`];
         
         if (description) parts.push(`Description: ${description}`);
-        if (goals && goals.length > 0) {
+        if (goals) {
           parts.push('Goals:');
-          goals.forEach(goal => parts.push(`- ${goal}`));
+          const goalList = goals.split(',').map(g => g.trim());
+          goalList.forEach(goal => parts.push(`- ${goal}`));
         }
         if (startDate) parts.push(`Start date: ${startDate}`);
         if (endDate) parts.push(`End date: ${endDate}`);
-        if (team && team.length > 0) parts.push(`Team: ${team.join(', ')}`);
+        if (team) parts.push(`Team: ${team}`);
         
         return {
           messages: [{
@@ -617,40 +618,44 @@ export class TanaMcpServer {
       {
         title: z.string().describe('Meeting title'),
         date: z.string().describe('Meeting date in ISO format'),
-        attendees: z.array(z.string()).describe('List of attendees'),
-        agenda: z.array(z.string()).optional().describe('Meeting agenda items'),
+        attendees: z.string().describe('Comma-separated list of attendees'),
+        agenda: z.string().optional().describe('Comma-separated meeting agenda items'),
         notes: z.string().optional().describe('Meeting notes'),
-        actionItems: z.array(z.object({
-          task: z.string(),
-          assignee: z.string().optional(),
-          dueDate: z.string().optional()
-        })).optional().describe('Action items from the meeting')
+        actionItems: z.string().optional().describe('Action items as JSON string array with task, assignee, and dueDate fields')
       },
       ({ title, date, attendees, agenda, notes, actionItems }) => {
         const parts = [
           `Create meeting notes in Tana:`,
           `Title: ${title}`,
           `Date: ${date}`,
-          `Attendees: ${attendees.join(', ')}`
+          `Attendees: ${attendees}`
         ];
         
-        if (agenda && agenda.length > 0) {
+        if (agenda) {
           parts.push('\nAgenda:');
-          agenda.forEach(item => parts.push(`- ${item}`));
+          const agendaItems = agenda.split(',').map(a => a.trim());
+          agendaItems.forEach(item => parts.push(`- ${item}`));
         }
         
         if (notes) {
           parts.push(`\nNotes:\n${notes}`);
         }
         
-        if (actionItems && actionItems.length > 0) {
+        if (actionItems) {
           parts.push('\nAction Items:');
-          actionItems.forEach(item => {
-            let actionText = `- ${item.task}`;
-            if (item.assignee) actionText += ` (assigned to: ${item.assignee})`;
-            if (item.dueDate) actionText += ` [due: ${item.dueDate}]`;
-            parts.push(actionText);
-          });
+          try {
+            const items = JSON.parse(actionItems);
+            if (Array.isArray(items)) {
+              items.forEach((item: any) => {
+                let actionText = `- ${item.task}`;
+                if (item.assignee) actionText += ` (assigned to: ${item.assignee})`;
+                if (item.dueDate) actionText += ` [due: ${item.dueDate}]`;
+                parts.push(actionText);
+              });
+            }
+          } catch (e) {
+            parts.push(`- ${actionItems}`);
+          }
         }
         
         return {
@@ -673,8 +678,8 @@ export class TanaMcpServer {
         topic: z.string().describe('Topic or title'),
         category: z.string().optional().describe('Category or type'),
         content: z.string().describe('Main content'),
-        sources: z.array(z.string()).optional().describe('Reference sources or links'),
-        relatedTopics: z.array(z.string()).optional().describe('Related topics for linking')
+        sources: z.string().optional().describe('Comma-separated reference sources or links'),
+        relatedTopics: z.string().optional().describe('Comma-separated related topics for linking')
       },
       ({ topic, category, content, sources, relatedTopics }) => {
         const parts = [`Create a knowledge entry in Tana about: "${topic}"`];
@@ -682,13 +687,14 @@ export class TanaMcpServer {
         if (category) parts.push(`Category: ${category}`);
         parts.push(`\nContent:\n${content}`);
         
-        if (sources && sources.length > 0) {
+        if (sources) {
           parts.push('\nSources:');
-          sources.forEach(source => parts.push(`- ${source}`));
+          const sourceList = sources.split(',').map(s => s.trim());
+          sourceList.forEach(source => parts.push(`- ${source}`));
         }
         
-        if (relatedTopics && relatedTopics.length > 0) {
-          parts.push(`\nRelated topics: ${relatedTopics.join(', ')}`);
+        if (relatedTopics) {
+          parts.push(`\nRelated topics: ${relatedTopics}`);
         }
         
         return {
@@ -938,14 +944,14 @@ Structured data fields.
         contents: [{
           uri: 'tana://info',
           mimeType: 'text/plain',
-          text: `Tana MCP Server v${this.server.version || '1.2.0'}
+          text: `Tana MCP Server v1.2.0
 Status: Connected
 API Endpoint: ${this.tanaClient['endpoint']}
 
 Capabilities:
-- Tools: ${Object.keys(this.server['_tools'] || {}).length} registered
-- Prompts: ${Object.keys(this.server['_prompts'] || {}).length} registered  
-- Resources: ${Object.keys(this.server['_resources'] || {}).length} available
+- Tools: Multiple tools available for node creation and management
+- Prompts: Pre-configured prompts for common tasks  
+- Resources: Documentation and examples available
 
 For detailed API documentation, see the 'api-docs' resource.
 For examples, see the 'examples' resource.`
