@@ -1,537 +1,561 @@
-/**
- * Tana MCP Server
- * An MCP server that connects to the Tana Input API
- */
+// ABOUTME: MCP server implementation for Tana Input API
+// Provides tools, prompts, and resources for interacting with Tana
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { TanaClient } from './tana-client';
-import {
+import { TanaClient } from './tana-client.js';
+import type {
   TanaBooleanNode,
   TanaDateNode,
   TanaFileNode,
+  TanaNode,
   TanaPlainNode,
   TanaReferenceNode,
-  TanaSupertag,
   TanaUrlNode
-} from '../types/tana-api';
-
-// Define Zod schemas for validating inputs
-const SupertagSchema = z.object({
-  id: z.string(),
-  fields: z.record(z.string()).optional()
-});
-
-// We need a recursive type for NodeSchema to handle field nodes and other nested structures
-const NodeSchema = z.lazy(() => 
-  z.object({
-    name: z.string().optional(),
-    description: z.string().optional(),
-    supertags: z.array(SupertagSchema).optional(),
-    children: z.array(z.any()).optional(), // Will be validated by implementation 
-    // Fields for specific node types
-    dataType: z.enum(['plain', 'reference', 'date', 'url', 'boolean', 'file']).optional(),
-    id: z.string().optional(), // For reference nodes
-    value: z.boolean().optional(), // For boolean nodes
-    file: z.string().optional(), // For file nodes (base64)
-    filename: z.string().optional(), // For file nodes
-    contentType: z.string().optional(), // For file nodes
-    // Field node properties
-    type: z.literal('field').optional(),
-    attributeId: z.string().optional()
-  })
-);
+} from '../types/tana-api.js';
 
 export class TanaMcpServer {
   private readonly server: McpServer;
   private readonly tanaClient: TanaClient;
 
-  constructor(apiToken: string, endpoint?: string) {
-    // Create the Tana client
+  constructor(apiToken: string, endpoint?: string, defaultTarget?: string) {
     this.tanaClient = new TanaClient({
       apiToken,
-      endpoint
+      endpoint,
+      defaultTarget
     });
 
-    // Create the MCP server with proper capabilities
     this.server = new McpServer({
       name: 'Tana MCP Server',
-      version: '1.2.0'
+      version: '2.0.0'
     });
 
-    // Register tools
     this.registerTools();
-
-    // Register prompts
     this.registerPrompts();
-
-    // Register resources
     this.registerResources();
   }
 
-  /**
-   * Start the MCP server
-   */
   async start(): Promise<void> {
-    // Create the transport
     const transport = new StdioServerTransport();
-
-    // Connect the server to the transport
     await this.server.connect(transport);
-    
-    // Server is ready - no logging to stderr to avoid protocol interference
   }
 
-  /**
-   * Register tools for interacting with Tana
-   */
   private registerTools(): void {
-    // Create a plain node tool
-    this.server.tool(
+    // Create plain node
+    this.server.registerTool(
       'create_plain_node',
       {
-        targetNodeId: z.string().optional(),
-        name: z.string(),
-        description: z.string().optional(),
-        supertags: z.array(SupertagSchema).optional()
+        title: 'Create Plain Node',
+        description: 'Create a simple text node in Tana with optional supertags. For formatted content with **bold**, inline refs, etc., use create_formatted_node instead.',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID (use "INBOX" for inbox, or omit for default target)'),
+          name: z.string().describe('The node title/name'),
+          description: z.string().optional().describe('Optional description (plain text, formatting not supported here)'),
+          supertagIds: z.array(z.string()).optional().describe('Array of supertag IDs to apply')
+        })
       },
-      async ({ targetNodeId, name, description, supertags }) => {
+      async (args: { targetNodeId?: string; name: string; description?: string; supertagIds?: string[] }) => {
         try {
+          const supertags = args.supertagIds?.map((id: string) => ({ id }));
           const node: TanaPlainNode = {
-            name,
-            description,
+            name: args.name,
+            description: args.description,
             supertags
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
-
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating plain node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating plain node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a reference node tool
-    this.server.tool(
+    // Create reference node
+    this.server.registerTool(
       'create_reference_node',
       {
-        targetNodeId: z.string().optional(),
-        referenceId: z.string()
+        title: 'Create Reference Node',
+        description: 'Create a reference to an existing node in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID to add this reference under'),
+          referenceId: z.string().describe('The ID of the node to reference')
+        })
       },
-      async ({ targetNodeId, referenceId }) => {
+      async (args: { targetNodeId?: string; referenceId: string }) => {
         try {
           const node: TanaReferenceNode = {
             dataType: 'reference',
-            id: referenceId
+            id: args.referenceId
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
-
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating reference node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating reference node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a date node tool
-    this.server.tool(
+    // Create date node
+    this.server.registerTool(
       'create_date_node',
       {
-        targetNodeId: z.string().optional(),
-        date: z.string(),
-        description: z.string().optional(),
-        supertags: z.array(SupertagSchema).optional()
+        title: 'Create Date Node',
+        description: 'Create a date node in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID to add this node under'),
+          date: z.string().describe('Date in ISO 8601 format (YYYY-MM-DD)'),
+          description: z.string().optional().describe('Optional description'),
+          supertagIds: z.array(z.string()).optional().describe('Array of supertag IDs to apply')
+        })
       },
-      async ({ targetNodeId, date, description, supertags }) => {
+      async (args: { targetNodeId?: string; date: string; description?: string; supertagIds?: string[] }) => {
         try {
+          const supertags = args.supertagIds?.map((id: string) => ({ id }));
           const node: TanaDateNode = {
             dataType: 'date',
-            name: date,
-            description,
+            name: args.date,
+            description: args.description,
             supertags
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
-
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating date node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating date node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a URL node tool
-    this.server.tool(
+    // Create URL node
+    this.server.registerTool(
       'create_url_node',
       {
-        targetNodeId: z.string().optional(),
-        url: z.string().url(),
-        description: z.string().optional(),
-        supertags: z.array(SupertagSchema).optional()
+        title: 'Create URL Node',
+        description: 'Create a URL/link node in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID to add this node under'),
+          url: z.string().url().describe('The URL to store'),
+          description: z.string().optional().describe('Optional description of the link'),
+          supertagIds: z.array(z.string()).optional().describe('Array of supertag IDs to apply')
+        })
       },
-      async ({ targetNodeId, url, description, supertags }) => {
+      async (args: { targetNodeId?: string; url: string; description?: string; supertagIds?: string[] }) => {
         try {
+          const supertags = args.supertagIds?.map((id: string) => ({ id }));
           const node: TanaUrlNode = {
             dataType: 'url',
-            name: url,
-            description,
+            name: args.url,
+            description: args.description,
             supertags
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
-
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating URL node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating URL node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a checkbox node tool
-    this.server.tool(
+    // Create checkbox/task node
+    this.server.registerTool(
       'create_checkbox_node',
       {
-        targetNodeId: z.string().optional(),
-        name: z.string(),
-        checked: z.boolean(),
-        description: z.string().optional(),
-        supertags: z.array(SupertagSchema).optional()
+        title: 'Create Checkbox Node',
+        description: 'Create a checkbox/task node in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID to add this node under'),
+          name: z.string().describe('The task/checkbox name'),
+          checked: z.boolean().describe('Whether the checkbox is checked'),
+          description: z.string().optional().describe('Optional description'),
+          supertagIds: z.array(z.string()).optional().describe('Array of supertag IDs to apply')
+        })
       },
-      async ({ targetNodeId, name, checked, description, supertags }) => {
+      async (args: { targetNodeId?: string; name: string; checked: boolean; description?: string; supertagIds?: string[] }) => {
         try {
+          const supertags = args.supertagIds?.map((id: string) => ({ id }));
           const node: TanaBooleanNode = {
             dataType: 'boolean',
-            name,
-            value: checked,
-            description,
+            name: args.name,
+            value: args.checked,
+            description: args.description,
             supertags
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
-
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating checkbox node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating checkbox node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a file node tool
-    this.server.tool(
+    // Create file node
+    this.server.registerTool(
       'create_file_node',
       {
-        targetNodeId: z.string().optional(),
-        fileData: z.string(), // base64 encoded file data
-        filename: z.string(),
-        contentType: z.string(),
-        description: z.string().optional(),
-        supertags: z.array(SupertagSchema).optional()
+        title: 'Create File Node',
+        description: 'Create a file attachment node in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID to add this node under'),
+          fileData: z.string().describe('Base64 encoded file data'),
+          filename: z.string().describe('Name of the file'),
+          contentType: z.string().describe('MIME type of the file (e.g., application/pdf)'),
+          description: z.string().optional().describe('Optional description'),
+          supertagIds: z.array(z.string()).optional().describe('Array of supertag IDs to apply')
+        })
       },
-      async ({ targetNodeId, fileData, filename, contentType, description, supertags }) => {
+      async (args: { targetNodeId?: string; fileData: string; filename: string; contentType: string; description?: string; supertagIds?: string[] }) => {
         try {
+          const supertags = args.supertagIds?.map((id: string) => ({ id }));
           const node: TanaFileNode = {
             dataType: 'file',
-            file: fileData,
-            filename,
-            contentType,
-            description,
+            file: args.fileData,
+            filename: args.filename,
+            contentType: args.contentType,
+            description: args.description,
             supertags
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
-
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating file node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating file node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a field node tool
-    this.server.tool(
-      'create_field_node',
-      {
-        targetNodeId: z.string().optional(),
-        attributeId: z.string(),
-        children: z.array(NodeSchema).optional()
-      },
-      async ({ targetNodeId, attributeId, children }) => {
-        try {
-          // Properly type the field node according to TanaFieldNode interface
-          const fieldNode = {
-            type: 'field' as const, // Use 'as const' to ensure type is "field"
-            attributeId,
-            children
-          };
-
-          // Cast to TanaNode to satisfy the type system
-          const result = await this.tanaClient.createNode(targetNodeId, fieldNode as any);
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
-          };
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating field node: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
-            isError: true
-          };
-        }
-      }
-    );
-
-    // Set node name tool
-    this.server.tool(
+    // Set node name
+    this.server.registerTool(
       'set_node_name',
       {
-        nodeId: z.string(),
-        newName: z.string()
+        title: 'Set Node Name',
+        description: 'Update the name of an existing node in Tana. Note: This only works on plain text nodes - checkbox/boolean nodes cannot be renamed via the API.',
+        inputSchema: z.object({
+          nodeId: z.string().describe('The ID of the node to rename'),
+          newName: z.string().describe('The new name for the node')
+        })
       },
-      async ({ nodeId, newName }) => {
+      async (args: { nodeId: string; newName: string }) => {
         try {
-          const result = await this.tanaClient.setNodeName(nodeId, newName);
-
+          const result = await this.tanaClient.setNodeName(args.nodeId, args.newName);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          // Provide helpful context for common errors
+          let helpText = '';
+          if (errorMsg.includes('400')) {
+            helpText = ' This may be because the node is a checkbox/boolean type, which cannot be renamed via the API.';
+          }
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error setting node name: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error setting node name: ${errorMsg}${helpText}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a complex node structure tool
-    this.server.tool(
+    // Create node structure (for complex nested nodes)
+    this.server.registerTool(
       'create_node_structure',
       {
-        targetNodeId: z.string().optional(),
-        node: NodeSchema
+        title: 'Create Node Structure',
+        description: 'Create a complex node structure with nested children. Pass a JSON object conforming to the Tana API node format.',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID to add this structure under'),
+          nodeJson: z.string().describe('JSON string representing the node structure. Must conform to Tana API format.')
+        })
       },
-      async ({ targetNodeId, node }) => {
+      async (args: { targetNodeId?: string; nodeJson: string }) => {
         try {
-          // Cast to TanaNode to satisfy the type system
-          const result = await this.tanaClient.createNode(targetNodeId, node as any);
-
+          const node = JSON.parse(args.nodeJson) as TanaNode;
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating node structure: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating node structure: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a supertag tool
-    this.server.tool(
+    // Create supertag
+    this.server.registerTool(
       'create_supertag',
       {
-        targetNodeId: z.string().optional().default('SCHEMA'),
-        name: z.string(),
-        description: z.string().optional()
+        title: 'Create Supertag',
+        description: 'Create a new supertag definition in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().default('SCHEMA').describe('Target node ID (defaults to SCHEMA)'),
+          name: z.string().describe('Name of the supertag'),
+          description: z.string().optional().describe('Description of the supertag')
+        })
       },
-      async ({ targetNodeId, name, description }) => {
+      async (args: { targetNodeId?: string; name: string; description?: string }) => {
         try {
           const node: TanaPlainNode = {
-            name,
-            description,
+            name: args.name,
+            description: args.description,
             supertags: [{ id: 'SYS_T01' }]
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
+          const result = await this.tanaClient.createNode(args.targetNodeId || 'SCHEMA', node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating supertag: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating supertag: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
       }
     );
 
-    // Create a field tool
-    this.server.tool(
+    // Create field definition
+    this.server.registerTool(
       'create_field',
       {
-        targetNodeId: z.string().optional().default('SCHEMA'),
-        name: z.string(),
-        description: z.string().optional()
+        title: 'Create Field',
+        description: 'Create a new field definition in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().default('SCHEMA').describe('Target node ID (defaults to SCHEMA)'),
+          name: z.string().describe('Name of the field'),
+          description: z.string().optional().describe('Description of the field')
+        })
       },
-      async ({ targetNodeId, name, description }) => {
+      async (args: { targetNodeId?: string; name: string; description?: string }) => {
         try {
           const node: TanaPlainNode = {
-            name,
-            description,
+            name: args.name,
+            description: args.description,
             supertags: [{ id: 'SYS_T02' }]
           };
 
-          const result = await this.tanaClient.createNode(targetNodeId, node);
+          const result = await this.tanaClient.createNode(args.targetNodeId || 'SCHEMA', node);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ],
-            isError: false
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
           };
         } catch (error) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Error creating field: ${error instanceof Error ? error.message : String(error)}`
-              }
-            ],
+            content: [{
+              type: 'text' as const,
+              text: `Error creating field: ${error instanceof Error ? error.message : String(error)}`
+            }],
+            isError: true
+          };
+        }
+      }
+    );
+
+    // Add field value to a node
+    this.server.registerTool(
+      'add_field_value',
+      {
+        title: 'Add Field Value',
+        description: 'Add a field value to an existing node in Tana',
+        inputSchema: z.object({
+          targetNodeId: z.string().describe('The node ID to add the field to'),
+          fieldId: z.string().describe('The field attribute ID'),
+          value: z.string().describe('The value for the field (can be text or a node reference ID)')
+        })
+      },
+      async (args: { targetNodeId: string; fieldId: string; value: string }) => {
+        try {
+          const fieldNode = {
+            type: 'field' as const,
+            attributeId: args.fieldId,
+            children: [{
+              name: args.value
+            }]
+          };
+
+          const result = await this.tanaClient.createNode(args.targetNodeId, fieldNode as TanaNode);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Error adding field value: ${error instanceof Error ? error.message : String(error)}`
+            }],
+            isError: true
+          };
+        }
+      }
+    );
+
+    // Create formatted node with rich content
+    this.server.registerTool(
+      'create_formatted_node',
+      {
+        title: 'Create Formatted Node',
+        description: 'Create a node with rich formatted content including inline references and text styling. Use this when you need to link to other nodes or apply formatting.',
+        inputSchema: z.object({
+          targetNodeId: z.string().optional().describe('Target node ID (use "INBOX" for inbox)'),
+          name: z.string().describe('The node title/name'),
+          content: z.string().describe('Content with formatting. Use: **bold**, __italic__, ~~strike~~, ^^highlight^^'),
+          inlineRefs: z.array(z.object({
+            placeholder: z.string().describe('Text to replace in content'),
+            nodeId: z.string().describe('Node ID to reference')
+          })).optional().describe('Array of inline node references to insert'),
+          inlineDates: z.array(z.object({
+            placeholder: z.string().describe('Text to replace in content'),
+            date: z.string().describe('Date in ISO format (YYYY-MM-DD)')
+          })).optional().describe('Array of inline date references to insert'),
+          supertagIds: z.array(z.string()).optional().describe('Array of supertag IDs to apply')
+        })
+      },
+      async (args: {
+        targetNodeId?: string;
+        name: string;
+        content: string;
+        inlineRefs?: Array<{ placeholder: string; nodeId: string }>;
+        inlineDates?: Array<{ placeholder: string; date: string }>;
+        supertagIds?: string[];
+      }) => {
+        try {
+          // Formatting goes in the NAME field, not description (per Tana API)
+          let formattedName = args.content;
+
+          // Replace placeholders with inline node references
+          if (args.inlineRefs) {
+            for (const ref of args.inlineRefs) {
+              formattedName = formattedName.replace(
+                ref.placeholder,
+                `<span data-inlineref-node="${ref.nodeId}">`
+              );
+            }
+          }
+
+          // Replace placeholders with inline date references
+          if (args.inlineDates) {
+            for (const dateRef of args.inlineDates) {
+              formattedName = formattedName.replace(
+                dateRef.placeholder,
+                `<span data-inlineref-date='{"dateTimeString":"${dateRef.date}"}'>`
+              );
+            }
+          }
+
+          const supertags = args.supertagIds?.map((id: string) => ({ id }));
+          const node: TanaPlainNode = {
+            name: formattedName,
+            supertags
+          };
+
+          const result = await this.tanaClient.createNode(args.targetNodeId, node);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Error creating formatted node: ${error instanceof Error ? error.message : String(error)}`
+            }],
             isError: true
           };
         }
@@ -539,188 +563,175 @@ export class TanaMcpServer {
     );
   }
 
-  /**
-   * Register prompts for common Tana operations
-   */
   private registerPrompts(): void {
-    // Prompt for creating a task
-    this.server.prompt(
+    // Create task prompt
+    this.server.registerPrompt(
       'create-task',
-      'Create a task node in Tana with optional due date and tags',
       {
-        title: z.string().describe('Task title'),
-        description: z.string().optional().describe('Task description'),
-        dueDate: z.string().optional().describe('Due date in ISO format (YYYY-MM-DD)'),
-        priority: z.enum(['high', 'medium', 'low']).optional().describe('Task priority'),
-        tags: z.string().optional().describe('Comma-separated tags to apply to the task')
+        title: 'Create Task',
+        description: 'Create a task node in Tana with optional due date and priority',
+        argsSchema: {
+          title: z.string().describe('Task title'),
+          description: z.string().optional().describe('Task description'),
+          dueDate: z.string().optional().describe('Due date in ISO format (YYYY-MM-DD)'),
+          priority: z.enum(['high', 'medium', 'low']).optional().describe('Task priority'),
+          tags: z.string().optional().describe('Comma-separated tags to apply')
+        }
       },
-      ({ title, description, dueDate, priority, tags }) => {
-        const parts = [`Create a task in Tana: "${title}"`];
-        
-        if (description) parts.push(`Description: ${description}`);
-        if (dueDate) parts.push(`Due date: ${dueDate}`);
-        if (priority) parts.push(`Priority: ${priority}`);
-        if (tags) parts.push(`Tags: ${tags}`);
-        
+      (args: { title: string; description?: string; dueDate?: string; priority?: string; tags?: string }) => {
+        const parts = [`Create a task in Tana: "${args.title}"`];
+        if (args.description) parts.push(`Description: ${args.description}`);
+        if (args.dueDate) parts.push(`Due date: ${args.dueDate}`);
+        if (args.priority) parts.push(`Priority: ${args.priority}`);
+        if (args.tags) parts.push(`Tags: ${args.tags}`);
+
         return {
           messages: [{
-            role: 'user',
-            content: {
-              type: 'text',
-              text: parts.join('\n')
-            }
+            role: 'user' as const,
+            content: { type: 'text' as const, text: parts.join('\n') }
           }]
         };
       }
     );
 
-    // Prompt for creating a project
-    this.server.prompt(
+    // Create project prompt
+    this.server.registerPrompt(
       'create-project',
-      'Create a project structure in Tana with goals and milestones',
       {
-        name: z.string().describe('Project name'),
-        description: z.string().optional().describe('Project description'),
-        goals: z.string().optional().describe('Comma-separated list of project goals'),
-        startDate: z.string().optional().describe('Start date in ISO format'),
-        endDate: z.string().optional().describe('End date in ISO format'),
-        team: z.string().optional().describe('Comma-separated team member names')
-      },
-      ({ name, description, goals, startDate, endDate, team }) => {
-        const parts = [`Create a project in Tana: "${name}"`];
-        
-        if (description) parts.push(`Description: ${description}`);
-        if (goals) {
-          parts.push('Goals:');
-          const goalList = goals.split(',').map(g => g.trim());
-          goalList.forEach(goal => parts.push(`- ${goal}`));
+        title: 'Create Project',
+        description: 'Create a project structure in Tana with goals and milestones',
+        argsSchema: {
+          name: z.string().describe('Project name'),
+          description: z.string().optional().describe('Project description'),
+          goals: z.string().optional().describe('Comma-separated list of project goals'),
+          startDate: z.string().optional().describe('Start date in ISO format'),
+          endDate: z.string().optional().describe('End date in ISO format'),
+          team: z.string().optional().describe('Comma-separated team member names')
         }
-        if (startDate) parts.push(`Start date: ${startDate}`);
-        if (endDate) parts.push(`End date: ${endDate}`);
-        if (team) parts.push(`Team: ${team}`);
-        
+      },
+      (args: { name: string; description?: string; goals?: string; startDate?: string; endDate?: string; team?: string }) => {
+        const parts = [`Create a project in Tana: "${args.name}"`];
+        if (args.description) parts.push(`Description: ${args.description}`);
+        if (args.goals) {
+          parts.push('Goals:');
+          args.goals.split(',').map((g: string) => g.trim()).forEach((goal: string) => parts.push(`- ${goal}`));
+        }
+        if (args.startDate) parts.push(`Start date: ${args.startDate}`);
+        if (args.endDate) parts.push(`End date: ${args.endDate}`);
+        if (args.team) parts.push(`Team: ${args.team}`);
+
         return {
           messages: [{
-            role: 'user',
-            content: {
-              type: 'text',
-              text: parts.join('\n')
-            }
+            role: 'user' as const,
+            content: { type: 'text' as const, text: parts.join('\n') }
           }]
         };
       }
     );
 
-    // Prompt for creating meeting notes
-    this.server.prompt(
+    // Create meeting notes prompt
+    this.server.registerPrompt(
       'create-meeting-notes',
-      'Create structured meeting notes in Tana',
       {
-        title: z.string().describe('Meeting title'),
-        date: z.string().describe('Meeting date in ISO format'),
-        attendees: z.string().describe('Comma-separated list of attendees'),
-        agenda: z.string().optional().describe('Comma-separated meeting agenda items'),
-        notes: z.string().optional().describe('Meeting notes'),
-        actionItems: z.string().optional().describe('Action items as JSON string array with task, assignee, and dueDate fields')
+        title: 'Create Meeting Notes',
+        description: 'Create structured meeting notes in Tana',
+        argsSchema: {
+          title: z.string().describe('Meeting title'),
+          date: z.string().describe('Meeting date in ISO format'),
+          attendees: z.string().describe('Comma-separated list of attendees'),
+          agenda: z.string().optional().describe('Comma-separated meeting agenda items'),
+          notes: z.string().optional().describe('Meeting notes'),
+          actionItems: z.string().optional().describe('JSON array of action items with task, assignee, dueDate fields')
+        }
       },
-      ({ title, date, attendees, agenda, notes, actionItems }) => {
+      (args: { title: string; date: string; attendees: string; agenda?: string; notes?: string; actionItems?: string }) => {
         const parts = [
-          `Create meeting notes in Tana:`,
-          `Title: ${title}`,
-          `Date: ${date}`,
-          `Attendees: ${attendees}`
+          'Create meeting notes in Tana:',
+          `Title: ${args.title}`,
+          `Date: ${args.date}`,
+          `Attendees: ${args.attendees}`
         ];
-        
-        if (agenda) {
+
+        if (args.agenda) {
           parts.push('\nAgenda:');
-          const agendaItems = agenda.split(',').map(a => a.trim());
-          agendaItems.forEach(item => parts.push(`- ${item}`));
+          args.agenda.split(',').map((a: string) => a.trim()).forEach((item: string) => parts.push(`- ${item}`));
         }
-        
-        if (notes) {
-          parts.push(`\nNotes:\n${notes}`);
+
+        if (args.notes) {
+          parts.push(`\nNotes:\n${args.notes}`);
         }
-        
-        if (actionItems) {
+
+        if (args.actionItems) {
           parts.push('\nAction Items:');
           try {
-            const items = JSON.parse(actionItems);
+            const items = JSON.parse(args.actionItems);
             if (Array.isArray(items)) {
-              items.forEach((item: any) => {
-                let actionText = `- ${item.task}`;
+              items.forEach((item: { task?: string; assignee?: string; dueDate?: string }) => {
+                let actionText = `- ${item.task || 'Task'}`;
                 if (item.assignee) actionText += ` (assigned to: ${item.assignee})`;
                 if (item.dueDate) actionText += ` [due: ${item.dueDate}]`;
                 parts.push(actionText);
               });
             }
-          } catch (e) {
-            parts.push(`- ${actionItems}`);
+          } catch {
+            parts.push(`- ${args.actionItems}`);
           }
         }
-        
+
         return {
           messages: [{
-            role: 'user',
-            content: {
-              type: 'text',
-              text: parts.join('\n')
-            }
+            role: 'user' as const,
+            content: { type: 'text' as const, text: parts.join('\n') }
           }]
         };
       }
     );
 
-    // Prompt for knowledge base entry
-    this.server.prompt(
+    // Create knowledge entry prompt
+    this.server.registerPrompt(
       'create-knowledge-entry',
-      'Create a knowledge base entry in Tana',
       {
-        topic: z.string().describe('Topic or title'),
-        category: z.string().optional().describe('Category or type'),
-        content: z.string().describe('Main content'),
-        sources: z.string().optional().describe('Comma-separated reference sources or links'),
-        relatedTopics: z.string().optional().describe('Comma-separated related topics for linking')
+        title: 'Create Knowledge Entry',
+        description: 'Create a knowledge base entry in Tana',
+        argsSchema: {
+          topic: z.string().describe('Topic or title'),
+          category: z.string().optional().describe('Category or type'),
+          content: z.string().describe('Main content'),
+          sources: z.string().optional().describe('Comma-separated reference sources or links'),
+          relatedTopics: z.string().optional().describe('Comma-separated related topics for linking')
+        }
       },
-      ({ topic, category, content, sources, relatedTopics }) => {
-        const parts = [`Create a knowledge entry in Tana about: "${topic}"`];
-        
-        if (category) parts.push(`Category: ${category}`);
-        parts.push(`\nContent:\n${content}`);
-        
-        if (sources) {
+      (args: { topic: string; category?: string; content: string; sources?: string; relatedTopics?: string }) => {
+        const parts = [`Create a knowledge entry in Tana about: "${args.topic}"`];
+        if (args.category) parts.push(`Category: ${args.category}`);
+        parts.push(`\nContent:\n${args.content}`);
+
+        if (args.sources) {
           parts.push('\nSources:');
-          const sourceList = sources.split(',').map(s => s.trim());
-          sourceList.forEach(source => parts.push(`- ${source}`));
+          args.sources.split(',').map((s: string) => s.trim()).forEach((source: string) => parts.push(`- ${source}`));
         }
-        
-        if (relatedTopics) {
-          parts.push(`\nRelated topics: ${relatedTopics}`);
+
+        if (args.relatedTopics) {
+          parts.push(`\nRelated topics: ${args.relatedTopics}`);
         }
-        
+
         return {
           messages: [{
-            role: 'user',
-            content: {
-              type: 'text',
-              text: parts.join('\n')
-            }
+            role: 'user' as const,
+            content: { type: 'text' as const, text: parts.join('\n') }
           }]
         };
       }
     );
   }
 
-  /**
-   * Register resources for interacting with Tana
-   */
   private registerResources(): void {
     // API documentation resource
-    this.server.resource(
+    this.server.registerResource(
       'api-docs',
       'tana://api/documentation',
       {
-        name: 'Tana API Documentation',
-        description: 'Overview of Tana Input API capabilities and usage',
+        description: 'Tana Input API documentation and usage guide',
         mimeType: 'text/markdown'
       },
       async () => ({
@@ -730,52 +741,48 @@ export class TanaMcpServer {
           text: `# Tana Input API Documentation
 
 ## Overview
-This MCP server provides access to Tana's Input API, allowing you to create and manipulate nodes in your Tana workspace.
+This MCP server provides access to Tana's Input API for creating and managing nodes in your Tana workspace.
 
-## Available Node Types
-- **Plain nodes**: Basic text nodes with optional formatting
-- **Reference nodes**: Links to existing nodes by ID
-- **Date nodes**: Nodes representing dates
-- **URL nodes**: Web links with metadata
-- **Checkbox nodes**: Boolean/task nodes
-- **File nodes**: Attachments with base64 encoded data
-- **Field nodes**: Structured data fields
+## Available Tools
 
-## Tools Available
-
-### Basic Node Creation
-- \`create_plain_node\`: Create a simple text node
-- \`create_reference_node\`: Create a reference to another node
-- \`create_date_node\`: Create a date node
-- \`create_url_node\`: Create a URL node
-- \`create_checkbox_node\`: Create a checkbox/task node
-- \`create_file_node\`: Create a file attachment node
-
-### Advanced Features
-- \`create_field_node\`: Create structured field nodes
-- \`create_node_structure\`: Create complex nested node structures
-- \`set_node_name\`: Update the name of an existing node
+### Node Creation
+- \`create_plain_node\` - Create basic text nodes
+- \`create_reference_node\` - Link to existing nodes
+- \`create_date_node\` - Create date nodes
+- \`create_url_node\` - Create URL/link nodes
+- \`create_checkbox_node\` - Create task/checkbox nodes
+- \`create_file_node\` - Attach files (base64 encoded)
+- \`create_node_structure\` - Create complex nested structures
 
 ### Schema Management
-- \`create_supertag\`: Create new supertags (node types)
-- \`create_field\`: Create new field definitions
+- \`create_supertag\` - Define new supertags
+- \`create_field\` - Define new fields
+- \`add_field_value\` - Add field values to nodes
+
+### Utilities
+- \`set_node_name\` - Rename existing nodes
 
 ## API Limits
 - Maximum 100 nodes per request
 - 1 request per second per token
-- Payload limit: 5000 characters
-- Workspace limit: 750k nodes`
+- 5000 character payload limit
+- 750k total nodes per workspace
+
+## Getting Node IDs
+To reference existing nodes, you need their Tana node IDs. You can find these:
+1. In the Tana URL when viewing a node
+2. From API responses when creating nodes
+3. Using Tana's built-in API node`
         }]
       })
     );
 
     // Node types reference
-    this.server.resource(
+    this.server.registerResource(
       'node-types',
       'tana://reference/node-types',
       {
-        name: 'Tana Node Types Reference',
-        description: 'Detailed information about all supported node types',
+        description: 'Reference for all Tana node types and their formats',
         mimeType: 'text/markdown'
       },
       async () => ({
@@ -785,47 +792,44 @@ This MCP server provides access to Tana's Input API, allowing you to create and 
           text: `# Tana Node Types Reference
 
 ## Plain Node
-The most basic node type, used for text content.
+Basic text nodes for general content.
 \`\`\`json
 {
   "name": "Node title",
-  "description": "Node content with **formatting**",
-  "supertags": [{"id": "tagId"}],
-  "children": []
+  "description": "Content with **markdown**",
+  "supertags": [{"id": "tagId"}]
 }
 \`\`\`
 
 ## Reference Node
-Links to an existing node.
+Links to existing nodes.
 \`\`\`json
 {
   "dataType": "reference",
-  "id": "targetNodeId"
+  "id": "existingNodeId"
 }
 \`\`\`
 
 ## Date Node
-Represents a date value.
+Date values in ISO format.
 \`\`\`json
 {
   "dataType": "date",
-  "name": "2024-01-01",
-  "description": "Optional description"
+  "name": "2024-01-15"
 }
 \`\`\`
 
 ## URL Node
-Stores web links.
+Web links.
 \`\`\`json
 {
   "dataType": "url",
-  "name": "https://example.com",
-  "description": "Link description"
+  "name": "https://example.com"
 }
 \`\`\`
 
 ## Checkbox Node
-Boolean/task nodes.
+Tasks with completion state.
 \`\`\`json
 {
   "dataType": "boolean",
@@ -846,12 +850,12 @@ File attachments.
 \`\`\`
 
 ## Field Node
-Structured data fields.
+Structured field values.
 \`\`\`json
 {
   "type": "field",
   "attributeId": "fieldId",
-  "children": [/* nested nodes */]
+  "children": [{"name": "field value"}]
 }
 \`\`\``
         }]
@@ -859,12 +863,11 @@ Structured data fields.
     );
 
     // Examples resource
-    this.server.resource(
+    this.server.registerResource(
       'examples',
       'tana://examples/common-patterns',
       {
-        name: 'Common Usage Examples',
-        description: 'Example patterns for common Tana operations',
+        description: 'Common usage patterns and examples',
         mimeType: 'text/markdown'
       },
       async () => ({
@@ -874,69 +877,50 @@ Structured data fields.
           text: `# Common Tana Usage Examples
 
 ## Creating a Task with Due Date
-\`\`\`javascript
-// Use create_checkbox_node with a child date node
+Use \`create_node_structure\` with nested field:
+\`\`\`json
 {
+  "dataType": "boolean",
   "name": "Complete project proposal",
-  "checked": false,
+  "value": false,
   "children": [
     {
       "type": "field",
-      "attributeId": "SYS_A13", // Due date field
-      "children": [{
-        "dataType": "date",
-        "name": "2024-12-31"
-      }]
+      "attributeId": "SYS_A13",
+      "children": [{"dataType": "date", "name": "2024-12-31"}]
     }
   ]
 }
 \`\`\`
 
-## Creating a Project Structure
-\`\`\`javascript
-// Use create_node_structure for complex hierarchies
-{
-  "name": "Q1 2024 Product Launch",
-  "supertags": [{"id": "projectTagId"}],
-  "children": [
-    {
-      "name": "Milestones",
-      "children": [
-        {"name": "Design Complete", "dataType": "date", "name": "2024-01-15"},
-        {"name": "Development Done", "dataType": "date", "name": "2024-02-28"}
-      ]
-    },
-    {
-      "name": "Tasks",
-      "children": [
-        {"dataType": "boolean", "name": "Create mockups", "value": false},
-        {"dataType": "boolean", "name": "Write documentation", "value": false}
-      ]
-    }
-  ]
-}
+## Creating a Tagged Note
+Use \`create_plain_node\` with supertags:
+\`\`\`
+name: "Important meeting notes"
+description: "Discussion about Q4 planning..."
+supertagIds: ["yourMeetingTagId"]
 \`\`\`
 
-## Adding Multiple Tags
-\`\`\`javascript
-{
-  "name": "Important Note",
-  "supertags": [
-    {"id": "tag1Id"},
-    {"id": "tag2Id", "fields": {"priority": "high"}}
-  ]
-}
-\`\`\``
+## Adding a Reference Link
+Use \`create_reference_node\`:
+\`\`\`
+targetNodeId: "parentNodeId"
+referenceId: "nodeToLinkTo"
+\`\`\`
+
+## System Supertag IDs
+- \`SYS_T01\` - Supertag definition
+- \`SYS_T02\` - Field definition
+- \`SYS_A13\` - Due date field`
         }]
       })
     );
 
     // Server info resource
-    this.server.resource(
+    this.server.registerResource(
       'server-info',
       'tana://info',
       {
-        name: 'Server Information',
         description: 'Current server status and configuration',
         mimeType: 'text/plain'
       },
@@ -944,20 +928,18 @@ Structured data fields.
         contents: [{
           uri: 'tana://info',
           mimeType: 'text/plain',
-          text: `Tana MCP Server v1.2.0
+          text: `Tana MCP Server v2.0.0
 Status: Connected
-API Endpoint: ${this.tanaClient['endpoint']}
+API Endpoint: ${(this.tanaClient as unknown as { endpoint: string }).endpoint}
 
-Capabilities:
-- Tools: Multiple tools available for node creation and management
-- Prompts: Pre-configured prompts for common tasks  
-- Resources: Documentation and examples available
+Registered Capabilities:
+- 11 Tools for node creation and management
+- 4 Prompts for common workflows
+- 4 Resources for documentation
 
-For detailed API documentation, see the 'api-docs' resource.
-For examples, see the 'examples' resource.`
+For API documentation, access the 'api-docs' resource.`
         }]
       })
     );
   }
-
-} 
+}

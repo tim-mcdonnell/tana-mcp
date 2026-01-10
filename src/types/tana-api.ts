@@ -94,4 +94,5 @@ export interface TanaAPIResponse {
 export interface TanaConfig {
   apiToken: string;
   endpoint?: string;
+  defaultTarget?: string; // Default target node ID (e.g., 'INBOX')
 } 

@@ -17,15 +17,24 @@ import {
 export class TanaClient {
   private readonly apiToken: string;
   private readonly endpoint: string;
+  private readonly defaultTarget?: string;
 
   constructor(config: TanaConfig) {
     this.apiToken = config.apiToken;
     this.endpoint = config.endpoint || 'https://europe-west1-tagr-prod.cloudfunctions.net/addToNodeV2';
+    this.defaultTarget = config.defaultTarget;
+  }
+
+  /**
+   * Get the default target node ID
+   */
+  getDefaultTarget(): string | undefined {
+    return this.defaultTarget;
   }
 
   /**
    * Create nodes in Tana
-   * @param targetNodeId Optional target node ID to add nodes under
+   * @param targetNodeId Optional target node ID to add nodes under (falls back to defaultTarget)
    * @param nodes Array of nodes to create
    * @returns The created nodes
    */
@@ -34,8 +43,11 @@ export class TanaClient {
       throw new Error('Maximum of 100 nodes can be created in a single request');
     }
 
+    // Use provided targetNodeId, or fall back to defaultTarget
+    const effectiveTarget = targetNodeId || this.defaultTarget;
+
     const request: TanaCreateNodesRequest = {
-      targetNodeId,
+      targetNodeId: effectiveTarget,
       nodes
     };
 

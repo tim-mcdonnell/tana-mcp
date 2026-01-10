@@ -19,8 +19,11 @@ if (!apiToken) {
 // Optional custom endpoint from environment variables
 const endpoint = process.env.TANA_API_ENDPOINT;
 
+// Optional default target (e.g., 'INBOX' to send all nodes to inbox by default)
+const defaultTarget = process.env.TANA_DEFAULT_TARGET;
+
 // Create and start the MCP server
-const server = new TanaMcpServer(apiToken, endpoint);
+const server = new TanaMcpServer(apiToken, endpoint, defaultTarget);
 
 // Start the server
 server.start().catch((error) => {
