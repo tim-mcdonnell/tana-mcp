@@ -1,5 +1,10 @@
 # Tana MCP Server
 
+> [!IMPORTANT]
+> This project is no longer actively maintained.
+> I've moved on from Tana and no longer use the software, so I'm not in a position to keep this MCP server current or provide ongoing support.
+> The repository remains available as a reference, and anyone who finds it useful is encouraged to fork it and continue development.
+
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that connects to [Tana's Input API](https://tana.inc/docs/input-api), enabling AI assistants to create and manipulate data in your Tana workspace.
 
 <a href="https://glama.ai/mcp/servers/r6v3135zsm">
